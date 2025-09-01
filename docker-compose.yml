@@ -1,0 +1,27 @@
+services:
+  orchestrator:
+    build: ./orchestrator
+    container_name: asb-orchestrator
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [n8n-installer_default]
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    container_name: asb-bot
+    env_file: .env
+    command: ["python", "app.py"]
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    networks: [n8n-installer_default]
+    restart: unless-stopped
+
+networks:
+  n8n-installer_default:
+    external: true

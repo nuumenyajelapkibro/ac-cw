@@ -1,0 +1,53 @@
+# Environment
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Test/typing caches
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+.tool-versions
+
+# Logs and databases
+*.log
+logs/
+*.sqlite3
+db.sqlite3
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.Trash-*
