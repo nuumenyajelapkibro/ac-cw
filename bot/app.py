@@ -67,14 +67,14 @@ async def progress_cmd(m: Message):
     except Exception as e:
         await m.answer(f"⚠️ Ошибка: {e}")
 
-async def on_startup(bot: Bot):
-    # Регистрируем вебхук (сбросим подвисшие апдейты)
+async def on_startup(app: web.Application):
+    bot: Bot = app["bot_instance"]
     await bot.set_webhook(
         url=f"{settings.BASE_URL}/webhook/{settings.TELEGRAM_TOKEN}",
         drop_pending_updates=True,
     )
 
-async def main():
+def create_app() -> web.Application:
     bot = Bot(
         token=settings.TELEGRAM_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML"),
@@ -83,11 +83,13 @@ async def main():
     dp.include_router(router)
 
     app = web.Application()
+    app["bot_instance"] = bot
+
     SimpleRequestHandler(dp, bot).register(app, path=f"/webhook/{settings.TELEGRAM_TOKEN}")
     setup_application(app, dp, bot=bot)
-    app.on_startup.append(lambda _: on_startup(bot))
 
-    web.run_app(app, host="0.0.0.0", port=8080)
+    app.on_startup.append(on_startup)
+    return app
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    web.run_app(create_app(), host="0.0.0.0", port=8080)
