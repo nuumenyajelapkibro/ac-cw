@@ -13,7 +13,22 @@ router = Router()
 @router.message(Command("start"))
 async def start_cmd(m: Message):
     await m.answer(
-        "Привет, теперь мы умеем в CI/CD! Я на вебхуке. Команды: /study &lt;тема&gt;, /summary, /quiz, /progress"
+        "👋 Привет! Я помогу учиться темам по плану.\n\n"
+        "ℹ️ Команды:\n"
+        "• /study &lt;тема&gt; — начать обучение\n"
+        "• /summary — конспект\n"
+        "• /quiz — квиз\n"
+        "• /progress — прогресс"
+    )
+
+@router.message(Command("help"))
+async def help_cmd(m: Message):
+    await m.answer(
+        "ℹ️ Доступные команды:\n"
+        "• /study &lt;тема&gt; — сформировать план обучения\n"
+        "• /summary — получить конспект\n"
+        "• /quiz — пройти квиз\n"
+        "• /progress — посмотреть прогресс"
     )
 
 @router.message(Command("study"))
@@ -21,7 +36,7 @@ async def study_cmd(m: Message):
     topic = (m.text or "").split(maxsplit=1)
     topic = topic[1].strip() if len(topic) > 1 else ""
     if not topic:
-        await m.answer("Укажи тему: /study <тема>")
+        await m.answer("❗️ Укажи тему: /study &lt;тема&gt;\nНапример: /study Python основы")
         return
     payload = {
         "topic": topic,
@@ -36,8 +51,12 @@ async def study_cmd(m: Message):
             r.raise_for_status()
             data = r.json()
         await m.answer(data.get("message", "🎓 План формируется..."))
-    except Exception as e:
-        await m.answer(f"⚠️ Ошибка: {e}")
+    except httpx.HTTPStatusError:
+        await m.answer("⚠️ Сервис вернул ошибку. Попробуйте позже.")
+    except httpx.RequestError:
+        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
+    except Exception:
+        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
 
 @router.message(Command("summary"))
 async def summary_cmd(m: Message):
@@ -46,8 +65,12 @@ async def summary_cmd(m: Message):
             r = await client.get(f"{settings.ORCH_URL}/summary")
             r.raise_for_status()
         await m.answer(r.json().get("message", "📝 Конспект скоро будет."))
-    except Exception as e:
-        await m.answer(f"⚠️ Ошибка: {e}")
+    except httpx.HTTPStatusError:
+        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
+    except httpx.RequestError:
+        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
+    except Exception:
+        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
 
 @router.message(Command("quiz"))
 async def quiz_cmd(m: Message):
@@ -56,8 +79,12 @@ async def quiz_cmd(m: Message):
             r = await client.get(f"{settings.ORCH_URL}/quiz")
             r.raise_for_status()
         await m.answer(r.json().get("message", "❓ Квиз в разработке."))
-    except Exception as e:
-        await m.answer(f"⚠️ Ошибка: {e}")
+    except httpx.HTTPStatusError:
+        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
+    except httpx.RequestError:
+        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
+    except Exception:
+        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
 
 @router.message(Command("progress"))
 async def progress_cmd(m: Message):
@@ -66,8 +93,12 @@ async def progress_cmd(m: Message):
             r = await client.get(f"{settings.ORCH_URL}/progress")
             r.raise_for_status()
         await m.answer(r.json().get("message", "📈 Прогресс пока не сохранён."))
-    except Exception as e:
-        await m.answer(f"⚠️ Ошибка: {e}")
+    except httpx.HTTPStatusError:
+        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
+    except httpx.RequestError:
+        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
+    except Exception:
+        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
 
 async def on_startup(app: web.Application):
     bot: Bot = app["bot_instance"]
