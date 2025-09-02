@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.client.default import DefaultBotProperties 
 from settings import settings
 import httpx
 
@@ -74,7 +75,10 @@ async def on_startup(bot: Bot):
     )
 
 async def main():
-    bot = Bot(token=settings.TELEGRAM_TOKEN, parse_mode="HTML")
+    bot = Bot(
+        token=settings.TELEGRAM_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
     dp = Dispatcher()
     dp.include_router(router)
 
