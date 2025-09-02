@@ -12,7 +12,9 @@ router = Router()
 
 @router.message(Command("start"))
 async def start_cmd(m: Message):
-    await m.answer("Привет! Я на вебхуке. Команды: /study <тема>, /summary, /quiz, /progress")
+    await m.answer(
+        "Привет! Я на вебхуке. Команды: /study &lt;тема&gt;, /summary, /quiz, /progress"
+    )
 
 @router.message(Command("study"))
 async def study_cmd(m: Message):
