@@ -1,0 +1,40 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for version info)
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.GH_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd "${APP_DIR:-${{ secrets.APP_DIR }}}"
+
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            ls -la .env || true
+
+            docker compose pull || true
+            docker compose up -d --build
+
+            docker image prune -f || true
+
+            curl -sS https://api.yumini.ru/health | grep -q '"status":"ok"' && echo "API OK" || (echo "API FAIL" && exit 1)
