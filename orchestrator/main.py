@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from .schemas import (
+from schemas import (
     StudyRequest,
     StudyPlanInfo,
     SummaryRequest,
@@ -16,7 +16,7 @@ from .schemas import (
     QuizResult,
     ProgressResponse,
 )
-from .fsm import (
+from fsm import (
     State,
     get_state,
     set_state,
@@ -28,7 +28,7 @@ from .fsm import (
     clear_quiz,
     fsm_guard_transition,
 )
-from .nodes import (
+from nodes import (
     plan,
     call_flowise_summary,
     call_flowise_quiz,

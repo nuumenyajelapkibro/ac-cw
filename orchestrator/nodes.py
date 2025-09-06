@@ -7,7 +7,7 @@ from typing import Any, List
 
 import httpx
 
-from .schemas import (
+from schemas import (
     StudyRequest,
     StudyPlanInfo,
     SummaryRequest,
