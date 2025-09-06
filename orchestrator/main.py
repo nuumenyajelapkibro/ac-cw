@@ -14,6 +14,7 @@ from schemas import (
     QuizRequest,
     QuizResponse,
     QuizResult,
+    QuizResultIn,
     ProgressResponse,
 )
 from fsm import (
@@ -144,16 +145,21 @@ async def quiz(
 # /quiz/result — завершить и записать
 # --------------------------------
 @app.post("/quiz/result")
-async def quiz_result(
-    user_id: int,
-    result: QuizResult,
-):
+async def quiz_result(payload: QuizResultIn):
     try:
         # очищаем активную сессию
-        clear_quiz(user_id)
+        clear_quiz(payload.user_id)
         # возвращаем в READY
-        set_state(user_id, State.READY)
-        await persist_progress(result)
+        set_state(payload.user_id, State.READY)
+        # сохраняем результат (передаём без user_id, как и ожидалось в М2)
+        await persist_progress(
+            QuizResult(
+                topic=payload.topic,
+                correct=payload.correct,
+                total=payload.total,
+                weak_topics=payload.weak_topics,
+            )
+        )
         return JSONResponse({"ok": True})
     except Exception as e:
         log.exception("quiz_result failed")

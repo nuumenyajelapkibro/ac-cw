@@ -20,7 +20,13 @@ log = logging.getLogger(__name__)
 
 # --- ENV ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://asb-orchestrator:8000")
+# Prefer ORCHESTRATOR_URL, fallback to legacy ORCH_URL, then default to service hostname
+ORCHESTRATOR_URL = (
+    os.getenv("ORCHESTRATOR_URL")
+    or os.getenv("ORCH_URL")
+    or "http://asb-orchestrator:8000"
+)
+BASE_URL = os.getenv("BASE_URL")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 APP_ENV = os.getenv("APP_ENV", "prod")
 
@@ -34,6 +40,10 @@ def _derive_webhook_path(url: str | None) -> str:
     return urlparse(url).path or f"/webhook/{TELEGRAM_TOKEN}"
 
 WEBHOOK_PATH = _derive_webhook_path(WEBHOOK_URL)
+
+# If WEBHOOK_URL is not explicitly provided but BASE_URL exists, build it
+if not WEBHOOK_URL and BASE_URL:
+    WEBHOOK_URL = f"{BASE_URL}{WEBHOOK_PATH}"
 
 bot = Bot(
     token=TELEGRAM_TOKEN,

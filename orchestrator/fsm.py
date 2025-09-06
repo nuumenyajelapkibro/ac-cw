@@ -138,3 +138,4 @@ def fsm_guard_transition(uid: int, from_states: set[str], to_state: str) -> str:
     if current not in from_states:
         return current
     set_state(uid, to_state)
+    return to_state

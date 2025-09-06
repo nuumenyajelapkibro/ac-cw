@@ -55,6 +55,11 @@ class QuizResult(BaseModel):
     weak_topics: Optional[List[str]] = None
 
 
+class QuizResultIn(QuizResult):
+    """Тело запроса для /quiz/result, включает user_id."""
+    user_id: int
+
+
 class ProgressResponse(BaseModel):
     completion_percent: float = Field(..., ge=0, le=100)
     avg_score: float = Field(..., ge=0, le=100)
@@ -71,5 +76,6 @@ __all__ = [
     "QuizQuestion",
     "QuizResponse",
     "QuizResult",
+    "QuizResultIn",
     "ProgressResponse",
 ]
