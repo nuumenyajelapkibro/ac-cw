@@ -1,128 +1,275 @@
+from __future__ import annotations
+
+import os
 import asyncio
-from aiohttp import web
-from aiogram import Bot, Dispatcher, Router
+import logging
+from typing import Any, Dict, Iterable
+from urllib.parse import urlparse
+
+from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.client.default import DefaultBotProperties 
-from settings import settings
+from aiohttp import web
 import httpx
 
-router = Router()
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
-@router.message(Command("start"))
-async def start_cmd(m: Message):
-    await m.answer(
-        "👋 Привет! Я помогу учиться темам по плану.\n\n"
-        "ℹ️ Команды:\n"
-        "• /study &lt;тема&gt; — начать обучение\n"
-        "• /summary — конспект\n"
-        "• /quiz — квиз\n"
+# --- ENV ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://asb-orchestrator:8000")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+APP_ENV = os.getenv("APP_ENV", "prod")
+
+if not TELEGRAM_TOKEN:
+    raise RuntimeError("TELEGRAM_TOKEN is not set")
+
+# Derive webhook path from WEBHOOK_URL (or fallback)
+def _derive_webhook_path(url: str | None) -> str:
+    if not url:
+        return f"/webhook/{TELEGRAM_TOKEN}"
+    return urlparse(url).path or f"/webhook/{TELEGRAM_TOKEN}"
+
+WEBHOOK_PATH = _derive_webhook_path(WEBHOOK_URL)
+
+bot = Bot(token=TELEGRAM_TOKEN, parse_mode="HTML")
+dp = Dispatcher()
+
+
+# ------------- helpers -------------
+TG_MESSAGE_LIMIT = 4096
+
+async def _post_json(path: str, json: Dict[str, Any]) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{ORCHESTRATOR_URL}{path}", json=json)
+        if resp.status_code == 409:
+            detail = resp.json().get("detail", "Конфликт состояний")
+            raise RuntimeError(f"409: {detail}")
+        resp.raise_for_status()
+        return resp.json()
+
+async def _get(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{ORCHESTRATOR_URL}{path}", params=params)
+        if resp.status_code == 409:
+            detail = resp.json().get("detail", "Конфликт состояний")
+            raise RuntimeError(f"409: {detail}")
+        resp.raise_for_status()
+        return resp.json()
+
+def _err_text(detail: str) -> str:
+    return f"⚠️ <b>Ошибка:</b> {detail}"
+
+def _chunk(text: str, size: int = TG_MESSAGE_LIMIT) -> Iterable[str]:
+    # сохранение границ строк где возможно
+    start = 0
+    while start < len(text):
+        end = min(start + size, len(text))
+        if end < len(text):
+            nl = text.rfind("\n", start, end)
+            if nl != -1 and nl > start + size // 2:
+                end = nl
+        yield text[start:end]
+        start = end
+
+async def send_long(message: Message, text: str):
+    for part in _chunk(text):
+        await message.answer(part)
+
+
+# ------------- commands -------------
+
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    await message.answer(
+        "Привет! Я <b>AI Study Buddy</b> 🤖\n"
+        "Команды:\n"
+        "• /study &lt;тема&gt; — создать план\n"
+        "• /summary — конспект по текущей теме\n"
+        "• /quiz — квиз 5–7 вопросов\n"
         "• /progress — прогресс"
     )
 
-@router.message(Command("help"))
-async def help_cmd(m: Message):
-    await m.answer(
-        "ℹ️ Доступные команды:\n"
-        "• /study &lt;тема&gt; — сформировать план обучения\n"
-        "• /summary — получить конспект\n"
-        "• /quiz — пройти квиз\n"
-        "• /progress — посмотреть прогресс"
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    await message.answer(
+        "Подсказка:\n"
+        "• /study Машинное обучение — начнём план\n"
+        "• /summary — верну конспект\n"
+        "• /quiz — запущу квиз\n"
+        "• /progress — покажу прогресс"
     )
 
-@router.message(Command("study"))
-async def study_cmd(m: Message):
-    topic = (m.text or "").split(maxsplit=1)
-    topic = topic[1].strip() if len(topic) > 1 else ""
-    if not topic:
-        await m.answer("❗️ Укажи тему: /study &lt;тема&gt;\nНапример: /study Python основы")
+@dp.message(Command("study"))
+async def cmd_study(message: Message):
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Укажи тему: <code>/study квантовые вычисления</code>")
         return
+
+    topic = parts[1]
+    user_id = message.from_user.id
+
     payload = {
         "topic": topic,
-        "depth": "beginner",
+        "depth": "basic",
         "duration_days": 7,
-        "daily_time_minutes": 30,
-        "telegram_user_id": m.from_user.id,
+        "daily_time_minutes": 20,
+        "user_id": user_id,
     }
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(f"{settings.ORCH_URL}/study", json=payload)
-            r.raise_for_status()
-            data = r.json()
-        await m.answer(data.get("message", "🎓 План формируется..."))
-    except httpx.HTTPStatusError:
-        await m.answer("⚠️ Сервис вернул ошибку. Попробуйте позже.")
-    except httpx.RequestError:
-        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
-    except Exception:
-        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
 
-@router.message(Command("summary"))
-async def summary_cmd(m: Message):
+    await message.answer("🧠 Планирую обучение…")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{settings.ORCH_URL}/summary")
-            r.raise_for_status()
-        await m.answer(r.json().get("message", "📝 Конспект скоро будет."))
-    except httpx.HTTPStatusError:
-        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
-    except httpx.RequestError:
-        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
-    except Exception:
-        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
+        data = await _post_json("/study", payload)
+        doc_url = data.get("doc_url") or "—"
+        await message.answer(
+            f"✅ План готов!\n"
+            f"Документ: {doc_url}\n\n"
+            f"Теперь можно вызвать /summary или /quiz"
+        )
+    except RuntimeError as e:
+        if str(e).startswith("409:"):
+            await message.answer(_err_text(str(e)[5:]))
+        else:
+            await message.answer(_err_text(str(e)))
+    except httpx.HTTPError as e:
+        await message.answer(_err_text(f"Оркестратор недоступен: {e}"))
+    except Exception as e:
+        log.exception("study failed")
+        await message.answer(_err_text(f"Непредвиденная ошибка: {e}"))
 
-@router.message(Command("quiz"))
-async def quiz_cmd(m: Message):
+@dp.message(Command("summary"))
+async def cmd_summary(message: Message):
+    user_id = message.from_user.id
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{settings.ORCH_URL}/quiz")
-            r.raise_for_status()
-        await m.answer(r.json().get("message", "❓ Квиз в разработке."))
-    except httpx.HTTPStatusError:
-        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
-    except httpx.RequestError:
-        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
-    except Exception:
-        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
+        data = await _get("/summary", {"user_id": user_id})
+        md = data.get("markdown", "")
+        if not md:
+            await message.answer("Конспект пока пуст.")
+            return
+        # Отправим как pre: это безопасно и читабельно
+        await send_long(message, "📝 <b>Конспект</b>:\n\n<pre>" + md + "</pre>")
+    except RuntimeError as e:
+        if str(e).startswith("409:"):
+            await message.answer(_err_text(str(e)[5:]))
+        else:
+            await message.answer(_err_text(str(e)))
+    except httpx.HTTPError as e:
+        await message.answer(_err_text(f"Оркестратор недоступен: {e}"))
 
-@router.message(Command("progress"))
-async def progress_cmd(m: Message):
+@dp.message(Command("quiz"))
+async def cmd_quiz(message: Message):
+    user_id = message.from_user.id
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{settings.ORCH_URL}/progress")
-            r.raise_for_status()
-        await m.answer(r.json().get("message", "📈 Прогресс пока не сохранён."))
-    except httpx.HTTPStatusError:
-        await m.answer("⚠️ Сервис недоступен. Попробуйте позже.")
-    except httpx.RequestError:
-        await m.answer("⚠️ Нет связи с сервисом. Попробуйте позже.")
+        data = await _get("/quiz", {"user_id": user_id, "questions_count": 6})
+        qs = data.get("questions", [])
+        if not qs:
+            await message.answer("Пока не удалось получить вопросы.")
+            return
+        blocks = []
+        for i, q in enumerate(qs, 1):
+            opts = q.get("options", [])
+            block = [
+                f"<b>Вопрос {i}:</b> {q.get('q')}",
+                *(f"{j+1}) {opt}" for j, opt in enumerate(opts[:4]))
+            ]
+            blocks.append("\n".join(block))
+        await send_long(message, "🎯 <b>Квиз</b>\n\n" + "\n\n".join(blocks))
+        await message.answer(
+            "Когда будешь готов(а), пришли команду вида: "
+            "<code>/quiz_result тема|правильных|всего</code>\n"
+            "Например: <code>/quiz_result ML|4|6</code>"
+        )
+    except RuntimeError as e:
+        if str(e).startswith("409:"):
+            await message.answer(_err_text(str(e)[5:]))
+        else:
+            await message.answer(_err_text(str(e)))
+    except httpx.HTTPError as e:
+        await message.answer(_err_text(f"Оркестратор недоступен: {e}"))
+
+@dp.message(Command("quiz_result"))
+async def cmd_quiz_result(message: Message):
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        await message.answer("Формат: <code>/quiz_result тема|правильных|всего</code>")
+        return
+
+    try:
+        topic, correct_s, total_s = parts[1].split("|")
+        payload = {
+            "topic": topic.strip(),
+            "correct": int(correct_s),
+            "total": int(total_s),
+            "weak_topics": [],
+        }
     except Exception:
-        await m.answer("⚠️ Что-то пошло не так. Попробуйте позже.")
+        await message.answer("Не удалось разобрать параметры. Пример: <code>/quiz_result ML|4|6</code>")
+        return
+
+    user_id = message.from_user.id
+    try:
+        await _post_json("/quiz/result", {"user_id": user_id, **payload})
+        await message.answer("✅ Результат сохранён. Можно продолжать в /summary или /quiz")
+    except RuntimeError as e:
+        if str(e).startswith("409:"):
+            await message.answer(_err_text(str(e)[5:]))
+        else:
+            await message.answer(_err_text(str(e)))
+    except httpx.HTTPError as e:
+        await message.answer(_err_text(f"Оркестратор недоступен: {e}"))
+
+@dp.message(Command("progress"))
+async def cmd_progress(message: Message):
+    user_id = message.from_user.id
+    try:
+        data = await _get("/progress", {"user_id": user_id})
+        doc = data.get("doc_url") or "—"
+        await message.answer(
+            "📈 <b>Прогресс</b>\n"
+            f"Готово: {data.get('completion_percent', 0)}%\n"
+            f"Средний балл: {data.get('avg_score', 0)}\n"
+            f"Слабые темы: {', '.join(data.get('weak_topics', [])) or '—'}\n"
+            f"Документ: {doc}"
+        )
+    except RuntimeError as e:
+        if str(e).startswith("409:"):
+            await message.answer(_err_text(str(e)[5:]))
+        else:
+            await message.answer(_err_text(str(e)))
+    except httpx.HTTPError as e:
+        await message.answer(_err_text(f"Оркестратор недоступен: {e}"))
+
+
+# ------------- webhook server -------------
 
 async def on_startup(app: web.Application):
-    bot: Bot = app["bot_instance"]
-    await bot.set_webhook(
-        url=f"{settings.BASE_URL}/webhook/{settings.TELEGRAM_TOKEN}",
-        drop_pending_updates=True,
-    )
+    # Регистрируем вебхук у Telegram, если задан WEBHOOK_URL
+    if WEBHOOK_URL:
+        await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+        log.info("Webhook set to %s", WEBHOOK_URL)
+    else:
+        # Локальный режим без внешнего URL — на всякий случай чистим вебхук
+        await bot.delete_webhook(drop_pending_updates=True)
+        log.info("Webhook deleted (no WEBHOOK_URL).")
 
-def create_app() -> web.Application:
-    bot = Bot(
-        token=settings.TELEGRAM_TOKEN,
-        default=DefaultBotProperties(parse_mode="HTML"),
-    )
-    dp = Dispatcher()
-    dp.include_router(router)
+async def on_cleanup(app: web.Application):
+    await bot.session.close()
 
+def build_app() -> web.Application:
     app = web.Application()
-    app["bot_instance"] = bot
-
-    SimpleRequestHandler(dp, bot).register(app, path=f"/webhook/{settings.TELEGRAM_TOKEN}")
-    setup_application(app, dp, bot=bot)
-
-    app.on_startup.append(on_startup)
+    # Регистрируем обработчик на путь WEBHOOK_PATH
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, on_startup=on_startup, on_shutdown=None, on_cleanup=on_cleanup)
     return app
 
+
+# ------------- entrypoint -------------
+
 if __name__ == "__main__":
-    web.run_app(create_app(), host="0.0.0.0", port=8080)
+    # Локальный dev: можно запустить aiohttp-сервер (за прокси отвечает Caddy/Nginx)
+    port = int(os.getenv("PORT", "8080"))
+    web.run_app(build_app(), host="0.0.0.0", port=port)

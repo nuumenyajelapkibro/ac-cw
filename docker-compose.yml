@@ -3,13 +3,15 @@ services:
     build: ./orchestrator
     container_name: asb-orchestrator
     env_file: .env
+    restart: always
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
       timeout: 3s
       retries: 5
     networks: [n8n-installer_default]
-    restart: unless-stopped
 
   bot:
     build: ./bot
