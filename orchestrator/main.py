@@ -62,8 +62,13 @@ async def study(req: StudyRequest):
 
     try:
         info = await plan(req)
-        # сохраняем контекст и переводим в READY
-        set_ctx(uid, topic=req.topic, level=req.depth, doc_url=info.doc_url, calendar_info=info.calendar_info)
+        set_ctx(
+            uid,
+            topic=req.topic,
+            level=req.depth,
+            doc_url=(str(info.doc_url) if info.doc_url else None),
+            calendar_info=info.calendar_info,
+        )
         set_state(uid, State.READY)
         return info
     except HTTPException:
