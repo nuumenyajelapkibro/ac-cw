@@ -4,8 +4,6 @@ services:
     container_name: asb-orchestrator
     env_file: .env
     restart: always
-    depends_on:
-      - redis
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
