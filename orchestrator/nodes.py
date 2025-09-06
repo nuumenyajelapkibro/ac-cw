@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 
 # --- Конфиг через ENV ---
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "https://n8n.yumini.ru/webhook/asb-plan")
+N8N_BASIC_USER = os.getenv("N8N_BASIC_USER")
+N8N_BASIC_PASS = os.getenv("N8N_BASIC_PASS")
 FLOWISE_SUMMARY_URL = os.getenv("FLOWISE_SUMMARY_URL", "https://flowise.yumini.ru/summary_chain")
 FLOWISE_QUIZ_URL = os.getenv("FLOWISE_QUIZ_URL", "https://flowise.yumini.ru/quiz_chain")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "30.0"))
@@ -41,7 +43,7 @@ async def plan(req: StudyRequest) -> StudyPlanInfo:
 async def trigger_n8n_plan(req: StudyRequest) -> StudyPlanInfo:
     payload = req.model_dump()
     try:
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, auth=(N8N_BASIC_USER, N8N_BASIC_PASS)) as client:
             resp = await client.post(N8N_WEBHOOK_URL, json=payload)
             resp.raise_for_status()
             data = _safe_json(resp)
