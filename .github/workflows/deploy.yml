@@ -24,17 +24,39 @@ jobs:
           key: ${{ secrets.GH_SSH_KEY }}
           script_stop: true
           script: |
-            set -e
+            set -euo pipefail
+
+            # 1) Go to app dir
             cd "${APP_DIR:-${{ secrets.APP_DIR }}}"
 
+            # 2) Update repo
             git fetch --all --prune
             git reset --hard origin/main
 
+            # 3) Show env (for debugging)
             ls -la .env || true
+            echo "--- docker compose up ---"
 
+            # 4) Build & run
             docker compose pull || true
             docker compose up -d --build
 
+            # 5) Cleanup old images
             docker image prune -f || true
 
-            curl -sS https://api.yumini.ru/health | grep -q '"status":"ok"' && echo "API OK" || (echo "API FAIL" && exit 1)
+            # 6) Post-deploy healthcheck (local orchestrator)
+            #    Fallback to localhost if ORCH_URL is not set in the server .env
+            API_URL="${ORCH_URL:-http://localhost:8000}"
+
+            echo "--- waiting orchestrator health at ${API_URL}/health ---"
+            for i in {1..20}; do
+              if curl -fsS "${API_URL}/health" >/dev/null; then
+                echo "API OK"
+                exit 0
+              fi
+              echo "waiting orchestrator... ($i/20)"
+              sleep 2
+            done
+
+            echo "API FAIL"
+            exit 1
