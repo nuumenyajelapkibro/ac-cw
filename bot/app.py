@@ -13,6 +13,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 import httpx
 
+from aiogram.client.default import DefaultBotProperties
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
@@ -33,7 +35,10 @@ def _derive_webhook_path(url: str | None) -> str:
 
 WEBHOOK_PATH = _derive_webhook_path(WEBHOOK_URL)
 
-bot = Bot(token=TELEGRAM_TOKEN, parse_mode="HTML")
+bot = Bot(
+    token=TELEGRAM_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
 dp = Dispatcher()
 
 
