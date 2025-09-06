@@ -26,37 +26,37 @@ jobs:
           script: |
             set -euo pipefail
 
-            # 1) Go to app dir
             cd "${APP_DIR:-${{ secrets.APP_DIR }}}"
 
-            # 2) Update repo
             git fetch --all --prune
             git reset --hard origin/main
 
-            # 3) Show env (for debugging)
             ls -la .env || true
             echo "--- docker compose up ---"
 
-            # 4) Build & run
             docker compose pull || true
             docker compose up -d --build
 
-            # 5) Cleanup old images
             docker image prune -f || true
 
-            # 6) Post-deploy healthcheck (local orchestrator)
-            #    Fallback to localhost if ORCH_URL is not set in the server .env
-            API_URL="${ORCH_URL:-http://localhost:8000}"
-
-            echo "--- waiting orchestrator health at ${API_URL}/health ---"
-            for i in {1..20}; do
-              if curl -fsS "${API_URL}/health" >/dev/null; then
-                echo "API OK"
-                exit 0
+            echo "--- wait container health (asb-orchestrator) ---"
+            # ждём пока health=healthy (healthcheck внутри контейнера уже настроен)
+            for i in {1..30}; do
+              STATUS="$(docker inspect -f '{{.State.Health.Status}}' asb-orchestrator 2>/dev/null || echo 'starting')"
+              echo "status: $STATUS ($i/30)"
+              if [ "$STATUS" = "healthy" ]; then
+                break
               fi
-              echo "waiting orchestrator... ($i/20)"
               sleep 2
             done
 
-            echo "API FAIL"
-            exit 1
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' asb-orchestrator)" != "healthy" ]; then
+              echo "API FAIL: container not healthy"
+              exit 1
+            fi
+
+            echo "--- in-container healthcheck ---"
+            # дергаем health изнутри контейнера (порт не нужен на хосте)
+            docker exec asb-orchestrator curl -fsS http://localhost:8000/health >/dev/null \
+              && echo "API OK" \
+              || (echo "API FAIL"; exit 1)
