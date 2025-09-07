@@ -1,0 +1,917 @@
+{
+  "name": "asb-plan",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "asb-plan",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -768,
+        464
+      ],
+      "id": "e9b094db-d99f-456d-9a85-b6539924cd91",
+      "name": "Webhook",
+      "webhookId": "d20b40f0-3236-4d80-8722-8cb012490cf4",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "90FFXgfFfWAcnXIS",
+          "name": "Unnamed credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3120,
+        384
+      ],
+      "id": "190a4832-1631-43e6-902f-e1d3f5899950",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -96,
+        512
+      ],
+      "id": "627d3615-0c12-450c-9aef-6dd63429ec92",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "oRBvbNH5ETbbEZVV",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $execution.id }}",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        32,
+        512
+      ],
+      "id": "d14872f1-280f-4479-9abc-e3da5df5e71c",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Отвечает за поиск и отбор учебных материалов по заданной теме. Обращается к Tavily Search, фильтрует результаты, убирает дубликаты и кликбейт. На выходе возвращает 3–6 нормализованных ресурсов с кратким описанием, датой публикации (если доступна), типом (видео, статья, курс и т. д.) и пояснением, почему именно этот материал полезен.\n\nКлючевые задачи:\nПостроить 2–4 уточнённых поисковых запроса.\nИспользовать Tavily для поиска и валидации фактов.\nНормализовать результаты (title, url, source_type, published_at, summary, why_good).\nВернуть список из 3–6 ресурсов в JSON.",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "<AgentInstructions>\n  <Role>\n    <Name>ASB_Researcher</Name>\n    <Description>\n      Ты — Ресёрчер. Находишь 3–6 качественных учебных материалов по теме и уровню, подтверждая всё инструментами Tavily.\n      Никаких придуманных ссылок. Возвращаешь нормализованный список.\n    </Description>\n  </Role>\n\n  <ToolUsage>\n    <Policy>\n      Всегда используй поиск Tavily.\n      Избегай кликбейта и paywall. Предпочитай авторитетные источники и актуальные материалы.\n    </Policy>\n    <SelectionCriteria>\n      Авторитет → Актуальность → Педагогическая ценность → Соответствие уровню → Формат.\n      Удаляй дубликаты по домену/заголовку. 3–6 результатов максимум.\n    </SelectionCriteria>\n  </ToolUsage>\n\n  <OutputFormat>\n    Отвечай только на русском языке\n    <Error>\n      {\"ok\": false, \"error\": {\"code\": \"RESEARCH_EMPTY|TOOL_ERROR\", \"message\": \"…\", \"hint\": \"…\"}}\n    </Error>\n    <Rules>Верни ТОЛЬКО JSON без Markdown/комментариев.</Rules>\n  </OutputFormat>\n</AgentInstructions>\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        160,
+        512
+      ],
+      "id": "5bf603e0-3755-4352-8380-e56a6b148ee8",
+      "name": "Researcher"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=<UserMessage>\n  <Input>\n    <Topic>{{$json.body.topic}}</Topic>\n    <Depth>{{$json.body.depth || 'beginner'}}</Depth>\n    <DurationDays>{{$json.body.duration_days || 7}}</DurationDays>\n    <DailyTimeMinutes>{{$json.body.daily_time_minutes || 30}}</DailyTimeMinutes>\n    <Timezone>{{$json.body.timezone || 'Europe/Berlin'}}</Timezone>\n    <UserId>{{$json.body.user_id}}</UserId>\n  </Input>\n  <Task>\n    Получи список материалов через tool researcher.search, затем построй план через tool planner.outline\n    и верни финальный JSON строго по схеме Structured Output.\n  </Task>\n</UserMessage>\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "<AgentInstructions>\n  <Role>\n    <Name>ASB_Orchestrator</Name>\n    <Description>\n      Ты — главный оркестратор учебного плана «AI Study Buddy». Запускаешь два под-агента:\n      (1) Researcher (Ресёрчер) — собирает материалы;\n      (2) Planner (Планнер) — строит план по дням, используя только найденные материалы.\n      Внешнему миру возвращаешь ТОЛЬКО финальный JSON по согласованной схеме.\n    </Description>\n    <CurrentDate>{{$now}}</CurrentDate>\n  </Role>\n\n  <Policy>\n    <Rules>\n      1) Любые ссылки и веб-факты приходят только из Ресёрчера — ничего не выдумывай.\n      2) Планировщик обязан ссылаться на материалы через их id; новых ссылок не создаёт.\n      3) Если Ресёрчер дал меньше 3 источников — одна повторная попытка с уточнёнными запросами; затем ok:false.\n      4) Если план невалиден — одна повторная попытка с жёсткими инструкциями; затем ok:false.\n      5) Если depth: \"basic\" переводи в \"beginner\" (Если вместо depth появилось level, меняй level на depth. Если нет timezone — \"Europe/Berlin\".\n      6) Итог — компактный JSON, по делу, без «воды» и без Markdown.\n    </Rules>\n  </Policy>\n\n  <Pipeline>\n    <Step>Вызови Ресёрчер с {topic, depth, duration_days, daily_time_minutes, timezone} → получи resources[].</Step>\n    <Step>Сверни ресурсы в список (id, title, url, source_type, published_at?, summary, why_good), максимум 6.</Step>\n    <Step>Вызови Планнер с {topic, depth, duration_days, daily_time_minutes, resources_min[]} → получи days[].</Step>\n    <Step>Собери финальный JSON строго по схеме Structured Output и верни его.</Step>\n  </Pipeline>\n\n  <Validation>\n    <Resources>\n      3–6 объектов; уникальные (title+url); валидные URI; source_type ∈ {youtube, article, doc, course, book};\n      published_at = YYYY-MM-DD или null; ненужные/дубликаты отбрасывать.\n    </Resources>\n    <Plan>\n      days.length ≥ 3; каждый day: {day ≥1, minutes 10..240, goal, focus, activity, resource_id ∈ resources_min.id}.\n    </Plan>\n  </Validation>\n\n  <Errors>\n    <Format>\n      {\"ok\": false, \"error\": {\"code\": \"RESEARCH_EMPTY|PLAN_INVALID|TOOL_ERROR|CONSTRAINT_VIOLATION\", \"message\": \"…\", \"hint\": \"…\"}}\n    </Format>\n  </Errors>\n\n  <Output>\n    <Note>Верни ТОЛЬКО валидный JSON по схеме Structured Output Parser этой ноды. Без пояснений и Markdown.</Note>\n  </Output>\n</AgentInstructions>\n",
+          "maxIterations": 20
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        128,
+        288
+      ],
+      "id": "c4a11bd4-63bc-46f3-85e8-53a9ed4a3e38",
+      "name": "Orchestrator",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        64,
+        720
+      ],
+      "id": "7e1b4886-3268-440c-a3e7-d6a0031ddc4b",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "oRBvbNH5ETbbEZVV",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        464,
+        720
+      ],
+      "id": "8d928a39-0395-46d1-8f06-00529e9b3c87",
+      "name": "OpenAI Chat Model3",
+      "credentials": {
+        "openAiApi": {
+          "id": "oRBvbNH5ETbbEZVV",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "query": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Query', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "@tavily/n8n-nodes-tavily.tavilyTool",
+      "typeVersion": 1,
+      "position": [
+        192,
+        720
+      ],
+      "id": "cb5871c8-24e5-456d-916c-c54798701517",
+      "name": "Search in Tavily1",
+      "credentials": {
+        "tavilyApi": {
+          "id": "pVfsMqdjSX2BsENb",
+          "name": "Tavily account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Получает список ресурсов от ресёрчера и строит персонализированный план обучения по дням. План распределяет материалы на duration_days, задаёт цели, фокус, активность (например, конспект, практика, повторение), а также указывает основной материал для каждого дня (по resource_id). Важно: план не придумывает новые материалы, а использует только те, что были выданы ресёрчером.\n\nКлючевые задачи:\nПревратить список ресурсов в логичный «учебный маршрут».\nРаспределить ресурсы по дням с учётом уровня (depth) и доступного времени (daily_time_minutes).\nЗадать цель, фокус и конкретную активность для каждого дня.\nСделать план живым и мотивирующим, но компактным.\nВернуть JSON с days[].",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "<AgentInstructions>\n  <Role>\n    <Name>ASB_Planner</Name>\n    <Description>\n      Ты — Планировщик. Строишь живой план по дням, используя ТОЛЬКО переданные материалы (resources_min) по их id.\n      Не создаёшь новых ссылок и источников.\n    </Description>\n  </Role>\n\n  <PlanningRules>\n    <Inputs>\n      topic, depth, duration_days, daily_time_minutes, resources_min[{id,title,url,type,summary,why}]\n    </Inputs>\n    <Logic>\n      1) Дней = duration_days; каждый день содержит: day, minutes≈daily_time_minutes, goal, focus, activity, resource_id.\n      2) Вводные — в начале; практика — середина; повторение/итоги — в конце.\n      3) Разрешено повторно использовать материал, но умеренно (≤2–3 раза).\n      4) Без новых источников; никаких URL в плане — только resource_id.\n      5) Ясные, короткие формулировки; тон живой, без воды.\n    </Logic>\n  </PlanningRules>\n\n  <OutputFormat>\n    Отвечай только на русском языке\n    <Error>\n      {\"ok\": false, \"error\": {\"code\": \"PLAN_INVALID|CONSTRAINT_VIOLATION\", \"message\": \"…\"}}\n    </Error>\n    <Rules>Верни ТОЛЬКО JSON без Markdown/комментариев.</Rules>\n  </OutputFormat>\n</AgentInstructions>\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        512
+      ],
+      "id": "73419292-07d1-4a9f-bed4-f5dc480f17bf",
+      "name": "Planner"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"ok\": true,\n  \"topic\": \"Machine Learning\",\n  \"depth\": \"beginner\",\n  \"duration_days\": 7,\n  \"daily_time_minutes\": 30,\n  \"timezone\": \"Europe/Berlin\",\n  \"resources\": [\n    {\n      \"id\": \"r1\",\n      \"title\": \"Machine Learning in 2024 – Beginner's Course\",\n      \"url\": \"https://www.youtube.com/watch?v=bmmQA8A-yUA\",\n      \"source_type\": \"youtube\",\n      \"published_at\": \"2024-02-29\",\n      \"summary\": \"Курс по основам ML с практикой на Python и современной дорожной картой.\",\n      \"why_good\": \"Структурированный и актуальный материал для новичков.\"\n    },\n    {\n      \"id\": \"r2\",\n      \"title\": \"Guide to Learning Machine Learning in 2024\",\n      \"url\": \"https://medium.com/.../guide-to-learning-ml-2024\",\n      \"source_type\": \"article\",\n      \"published_at\": \"2024-01-01\",\n      \"summary\": \"Пошаговый навигатор по ресурсам и проектам для старта в ML.\",\n      \"why_good\": \"Помогает выстроить дорожную карту и выбрать источники.\"\n    },\n    {\n      \"id\": \"r3\",\n      \"title\": \"Intro to ML - Kaggle\",\n      \"url\": \"https://www.kaggle.com/learn/intro-to-machine-learning\",\n      \"source_type\": \"course\",\n      \"published_at\": null,\n      \"summary\": \"Бесплатный курс с упражнениями: модели, валидация, улучшение качества.\",\n      \"why_good\": \"Практико-ориентированный формат с заданиями.\"\n    }\n  ],\n  \"plan\": {\n    \"days\": [\n      { \"day\": 1, \"minutes\": 30, \"goal\": \"Понять базовые термины ML\", \"focus\": \"Введение и ключевые понятия\", \"activity\": \"Посмотреть вводное видео и выписать 5 терминов\", \"resource_id\": \"r1\" },\n      { \"day\": 2, \"minutes\": 30, \"goal\": \"Понять дорожную карту\", \"focus\": \"Обзор направлений и практик\", \"activity\": \"Прочитать статью и выбрать 2–3 темы для углубления\", \"resource_id\": \"r2\" },\n      { \"day\": 3, \"minutes\": 30, \"goal\": \"Сделать первый мини-проект\", \"focus\": \"Практика на датасете\", \"activity\": \"Пройти 1–2 модуля Kaggle и запустить ноутбук\", \"resource_id\": \"r3\" }\n    ],\n    \"note\": \"На 6–7 день — повторение и мини-проект по выбранному датасету.\"\n  }\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        736,
+        512
+      ],
+      "id": "db9564de-7867-44af-a0c1-384f3d11f9f5",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"ok\": true, \"resources\": [\n    {\n      \"title\": \"string\",\n      \"url\": \"https://…\",\n      \"source_type\": \"youtube|article|doc|course|book\",\n      \"published_at\": \"YYYY-MM-DD|null\",\n      \"summary\": \"2–3 предложения по сути\",\n      \"why_good\": \"1–2 предложения — польза/уровень/формат\"\n    }\n]}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        336,
+        720
+      ],
+      "id": "e1447dce-44e1-4294-84f9-efadcf2e0292",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"ok\": true, \"days\": [\n    { \"day\": 1, \"minutes\": 30, \"goal\": \"…\", \"focus\": \"…\", \"activity\": \"…\", \"resource_id\": \"r1\" }\n  ], \"note\": \"краткая рекомендация или пусто\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        720
+      ],
+      "id": "8c1fb755-209f-4f3e-b3a0-11cbf6c1b2af",
+      "name": "Structured Output Parser3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $input.first().json.output;\n\n// Заголовок\nlet md = `# План изучения: ${root.topic}\\n`;\nmd += `**Уровень:** ${root.depth}\\n`;\nmd += `**Длительность:** ${root.duration_days} дн.\\n`;\nmd += `**Время в день:** ${root.daily_time_minutes} мин\\n\\n`;\n\n// Материалы\nmd += `## Подборка материалов\\n`;\n(root.resources || []).forEach((r,i) => {\n  const date = r.published_at ? ` · дата: ${r.published_at}` : '';\n  md += `${i+1}. ${r.title}\\n · тип: ${r.source_type}${date}\\n\\n`;\n  if (r.summary) md += `${r.summary}\\n\\n`;\n  if (r.why_good) md += `Почему хорошо: ${r.why_good}\\n\\n`;\n});\n\n// Расписание\nmd += `## Расписание по дням\\n`;\n(root.days || []).forEach(d => {\n  const res = (root.resources || []).find(r => r.id === d.resource_id);\n  const resTitle = res ? res.title : d.resource_id;\n  md += `**День ${d.day}** (${d.minutes} мин): ${d.focus} → ${resTitle}\\n\\n`;\n});\n\nreturn [{ json: { ok:true, markdown: md } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        384
+      ],
+      "id": "a4f0a9da-3020-44fb-b001-e654eda303cf",
+      "name": "gen md"
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=17fzYnfYhEQM09v9qbFZgmTsK2KLk3OC5",
+        "title": "=План изучения {{ $('Orchestrator').item.json.output.topic }} от {{ $now.format('yyyy-MM-dd') }} "
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        384
+      ],
+      "id": "ec0aa4ef-e776-4d4d-9562-f1774e56df36",
+      "name": "Create a document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "eBMgpgAiy6k08cwg",
+          "name": "Google Docs account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('gen md').item.json.markdown }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        480
+      ],
+      "id": "4e32a0a0-9915-4bb1-b99e-f904909cc54a",
+      "name": "Update a document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "eBMgpgAiy6k08cwg",
+          "name": "Google Docs account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $('Orchestrator').first().json;\nconst root = j.output || j;\n\nconst tz = root.timezone || 'Europe/Berlin';\nconst topic = root.topic || 'Study Plan';\nconst docUrl = `https://docs.google.com/document/d/${$input.first().json.documentId}`;\n\n// когда начинать (с завтрашнего дня), локальное время занятия:\nconst START_HOUR = 19;                    // 19:00\nconst DURATION_MIN = root.daily_time_minutes || 30;\n\nfunction addDays(d, n) {\n  const x = new Date(d.getTime());\n  x.setUTCDate(x.getUTCDate() + n);\n  return x;\n}\n\nfunction ymd(date) {\n  // YYYY-MM-DD в UTC (дальше время оставим без offset, таймзону прокинем в ноду)\n  const y = date.getUTCFullYear();\n  const m = String(date.getUTCMonth()+1).padStart(2,'0');\n  const d = String(date.getUTCDate()).padStart(2,'0');\n  return `${y}-${m}-${d}`;\n}\n\nconst todayUTC = new Date();                   // сегодняшняя дата по UTC\nconst startDay = addDays(todayUTC, 1);         // начнём \"завтра\"\nconst events = [];\n\nfor (const d of (root.days || [])) {\n  const dateStr = ymd(addDays(startDay, d.day - 1));  // YYYY-MM-DD\n  const pad = n => String(n).padStart(2, '0');\n\n  const start = `${dateStr}T${pad(START_HOUR)}:00:00`;                 // без смещения\n  const endMinutes = DURATION_MIN;\n  const endHour = START_HOUR + Math.floor(endMinutes / 60);\n  const endMin = pad(endMinutes % 60);\n  const end = `${dateStr}T${pad(endHour)}:${endMin}:00`;\n\n  const res = (root.resources || []).find(r => r.id === d.resource_id);\n  const resTitle = res ? res.title : d.resource_id;\n  const resUrl = res ? res.url : '';\n\n  let desc = `Цель: ${d.goal}\\nФокус: ${d.focus}\\nАктивность: ${d.activity}`;\n  if (resTitle) desc += `\\nРесурс: ${resTitle}${resUrl ? `\\n${resUrl}` : ''}`;\n  if (docUrl) desc += `\\n\\nПлан: ${docUrl}`;\n\n  events.push({\n    ok: true,\n    summary: `Study: ${topic} (Day ${d.day})`,\n    description: desc,\n    timezone: tz,\n    start,      // \"YYYY-MM-DDTHH:mm:ss\"\n    end,        // \"YYYY-MM-DDTHH:mm:ss\"\n  });\n}\n\nreturn events.map(e => ({ json: e }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        480
+      ],
+      "id": "96955dfe-c253-4b33-8f49-f1e379b8f4df",
+      "name": "build_calendar_events"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "8619929d6aef1f0329660f43a41a855314b1ba7de3c28bc93f2ec02e67541ba1@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "ac-cw"
+        },
+        "start": "={{ $json.start }}",
+        "end": "={{ $json.end }}",
+        "additionalFields": {
+          "description": "={{ $json.description }}",
+          "summary": "={{ $json.summary }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        2448,
+        480
+      ],
+      "id": "a761465f-4c30-4f9e-b9dd-4f4a9de6fc91",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "7Mi0ss6A5gx9yrNb",
+          "name": "Google Calendar account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $input.all();\n// Учитываем только успешно созданные события (наличие id/htmlLink/start)\nconst okItems = all.filter(it => it && it.json && (it.json.id || it.json.htmlLink || it.json.start));\nconst count = okItems.length;\nconst tz = okItems[0]?.json?.start?.timeZone || 'Europe/Berlin';\nconst firstEventIso = okItems[0]?.json?.start?.dateTime || null;\nreturn [{ json: { ok: true, calendar_info: { created: count > 0, event_count: count, tz, first_event_iso: firstEventIso } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        576
+      ],
+      "id": "3ded9f5e-7dd0-4667-b1af-d455dd16f5ba",
+      "name": "assemble_calendar_info"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"ok\": true,\n  \"request_id\": \"{{$execution.id}}\",\n  \"topic\": \"{{$('Orchestrator').first().json.output.topic}}\",\n  \"depth\": \"{{ $('Orchestrator').first().json.output.depth }}\",\n  \"doc_url\": \"https://docs.google.com/document/d/{{$('Create a document').first().json.id}}\",\n  \"calendar_info\": {{$('assemble_calendar_info').first().json.calendar_info}}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2896,
+        576
+      ],
+      "id": "cfcb88bd-a393-4e37-9183-7919a438f8ab",
+      "name": "assemble_overall_info"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || {};\n\nfunction normDepth(x) {\n  const v = String(x || '').toLowerCase().trim();\n  if (v === 'basic') return 'beginner';\n  return v || 'beginner';\n}\n\nfunction numIn(x, min, max, def) {\n  const n = Number(x ?? def);\n  if (!Number.isFinite(n)) return null;\n  if (n < min || n > max) return null;\n  return Math.floor(n);\n}\n\nconst errors = [];\nconst topic = (body.topic || '').toString().trim();\nif (!topic) errors.push('topic is required');\nconst depth = normDepth(body.depth);\nconst duration_days = numIn(body.duration_days, 1, 60, 7);\nif (duration_days === null) errors.push('duration_days must be 1..60');\nconst daily_time_minutes = numIn(body.daily_time_minutes, 5, 240, 30);\nif (daily_time_minutes === null) errors.push('daily_time_minutes must be 5..240');\nconst timezone = (body.timezone || 'Europe/Berlin').toString();\n\nif (errors.length) {\n  return [{ json: { ok: false, request_id: $execution.id, error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: errors } } }];\n}\n\nreturn [{ json: { ok: true, body: { topic, depth, duration_days, daily_time_minutes, timezone, user_id: body.user_id } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        464
+      ],
+      "id": "355e20b1-3b17-4e21-af9e-f062973260d0",
+      "name": "Validate Input"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "7ccc9742-badb-44f0-9f73-5daf446cfede",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "\"true\"",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        464
+      ],
+      "id": "d38ed2b0-7a05-497a-a5f1-13cef286c6ee",
+      "name": "Validation OK?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "0256bd32-ff15-4b84-a77e-a74be517e7ed",
+              "leftValue": "={{ $json.output && $json.output.topic && ($json.output.depth || $json.output.level) && Array.isArray($json.output.resources) && $json.output.resources.length >= 3 && Array.isArray($json.output.days) && $json.output.days.length >= 3 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        288
+      ],
+      "id": "8fd48830-62c2-4c90-b271-3e2a9511fbb7",
+      "name": "Orchestrator OK?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json?.error?.message || ($json?.error ? JSON.stringify($json.error) : 'Unknown orchestrator error');\nreturn [{ json: { ok: false, request_id: $execution.id, error: { code: 'ORCHESTRATOR_FAILED', message: msg } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        0
+      ],
+      "id": "1412e024-7b4a-4a59-bb84-096c2cd3bc09",
+      "name": "EH Orchestrator"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a6da61bc-e22a-4579-9587-fa00664c4c54",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        384
+      ],
+      "id": "4f31e145-5cef-40ab-88f1-01ec461fac16",
+      "name": "Doc Created?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const errMsg = $json?.error?.message || ($json?.error ? JSON.stringify($json.error) : 'Google Docs create failed');\nreturn [{ json: { ok: false, request_id: $execution.id, error: { code: 'GDRIVE_DOC_CREATE_FAILED', message: errMsg } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        192
+      ],
+      "id": "5421c6f1-7161-4307-bb9d-b1e6b2fbd69f",
+      "name": "EH Google Docs Create"
+    },
+    {
+      "parameters": {
+        "jsCode": "const o = $('Orchestrator').first().json.output || {};\nreturn [{ json: { ok: true, request_id: $execution.id, topic: o.topic, depth: o.depth, doc_url: 'https://docs.google.com/document/d/FAKE_M2_PLAN', calendar_info: { created: false, event_count: 0, reason: 'google_unavailable' } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        192
+      ],
+      "id": "bdbc20f0-0236-4bea-84c1-8f5a0e2abded",
+      "name": "build_google_fallback_overall"
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json?.error?.message || ($json?.error ? JSON.stringify($json.error) : 'Google Calendar create failed');\n// Диагностическая запись; не подключаем к финальному ответу\nreturn [{ json: { ok: false, stage: 'GCAL_CREATE', error: { code: 'GCAL_CREATE_FAILED', message: msg } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        384
+      ],
+      "id": "bcd4cc8e-6590-40ae-a746-399d9a7acaee",
+      "name": "EH Google Calendar"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        816,
+        720
+      ],
+      "id": "8683c26f-8ce1-4699-941c-56aba4d88ac3",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "oRBvbNH5ETbbEZVV",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Validation OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation OK?": {
+      "main": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Researcher": {
+      "ai_tool": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Researcher",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Planner",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search in Tavily1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Researcher",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Planner": {
+      "ai_tool": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Orchestrator",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Researcher",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser3": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Planner",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Orchestrator OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestrator OK?": {
+      "main": [
+        [
+          {
+            "node": "gen md",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EH Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EH Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gen md": {
+      "main": [
+        [
+          {
+            "node": "Create a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a document": {
+      "main": [
+        [
+          {
+            "node": "Doc Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doc Created?": {
+      "main": [
+        [
+          {
+            "node": "Update a document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EH Google Docs Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EH Google Docs Create": {
+      "main": [
+        [
+          {
+            "node": "build_google_fallback_overall",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "build_google_fallback_overall": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a document": {
+      "main": [
+        [
+          {
+            "node": "build_calendar_events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "build_calendar_events": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "assemble_calendar_info",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "EH Google Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "assemble_calendar_info": {
+      "main": [
+        [
+          {
+            "node": "assemble_overall_info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "assemble_overall_info": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EH Google Calendar": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "4546335b-0980-4054-8793-4d7421981196",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f2343eedbb5c3e91a5994eb1324db621e9c6cc7446f2d44796e7d92d0afc5ccf"
+  },
+  "id": "QlEALV0jSQvlJDs9",
+  "tags": []
+}
