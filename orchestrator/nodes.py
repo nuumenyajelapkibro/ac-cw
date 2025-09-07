@@ -6,6 +6,8 @@ import logging
 from typing import Any, List
 
 import httpx
+import asyncio
+from fastapi import HTTPException
 
 from schemas import (
     StudyRequest,
@@ -42,26 +44,78 @@ async def plan(req: StudyRequest) -> StudyPlanInfo:
 
 async def trigger_n8n_plan(req: StudyRequest) -> StudyPlanInfo:
     payload = req.model_dump()
+    attempts = 2
+    backoff_base = 0.6
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, auth=(N8N_BASIC_USER, N8N_BASIC_PASS)) as client:
-            resp = await client.post(N8N_WEBHOOK_URL, json=payload)
-            resp.raise_for_status()
-            data = _safe_json(resp)
-            doc_url = (data or {}).get("doc_url")
-            calendar_info = (data or {}).get("calendar_info")
-            if not doc_url:
-                # n8n ответил странно — вернём fallback
-                return _stub_plan()
-            return StudyPlanInfo(doc_url=doc_url, calendar_info=calendar_info)
+            last_exc: Exception | None = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    resp = await client.post(N8N_WEBHOOK_URL, json=payload)
+                    # 5xx считаем сетевой/инфраструктурной ошибкой — ретраим
+                    if 500 <= resp.status_code < 600:
+                        raise httpx.HTTPStatusError("server error", request=resp.request, response=resp)
+
+                    # 4xx — бизнес-ошибка от n8n: пробуем достать сообщение
+                    if 400 <= resp.status_code < 500:
+                        msg = _extract_error_message(resp)
+                        _log_n8n_business_error(req, None, msg)
+                        raise HTTPException(status_code=resp.status_code, detail=msg or "n8n returned client error")
+
+                    # 2xx — разбираем тело
+                    data = _safe_json(resp)
+                    item = _pick_ok_item(data)
+                    # Если явно ok=false или нет годного элемента — 400
+                    if not item or (isinstance(item, dict) and item.get("ok") is False):
+                        msg = (item or {}).get("error") if isinstance(item, dict) else None
+                        _log_n8n_business_error(req, _safe_get(item, "request_id"), msg)
+                        raise HTTPException(status_code=400, detail=msg or "n8n: план не сформирован")
+
+                    doc_url = _safe_get(item, "doc_url")
+                    if not doc_url:
+                        _log_n8n_business_error(req, _safe_get(item, "request_id"), "doc_url missing")
+                        raise HTTPException(status_code=422, detail="n8n: не вернул doc_url")
+
+                    cal_raw = _safe_get(item, "calendar_info")
+                    calendar_info = _coerce_calendar_info(cal_raw)
+
+                    # Логирование успеха
+                    log.info(
+                        "n8n plan success: request_id=%s topic=%s user_id=%s doc_url=%s event_count=%s",
+                        _safe_get(item, "request_id"), req.topic, req.user_id, doc_url,
+                        (calendar_info or {}).get("event_count") if isinstance(calendar_info, dict) else None,
+                    )
+
+                    return StudyPlanInfo(doc_url=doc_url, calendar_info=calendar_info)
+
+                except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError, httpx.HTTPStatusError) as e:
+                    last_exc = e
+                    if attempt < attempts:
+                        await asyncio.sleep(backoff_base * (2 ** (attempt - 1)))
+                        continue
+                    # Все попытки исчерпаны — вернём заглушку
+                    log.warning(
+                        "n8n plan webhook failed (network/server): %s | topic=%s user_id=%s",
+                        e, req.topic, req.user_id,
+                    )
+                    return _stub_plan()
+
+            # Теоретически недостижимо
+            if last_exc:
+                raise last_exc
+    except HTTPException:
+        # бизнес-ошибки пробрасываем дальше, их обработает FastAPI слой
+        raise
     except Exception as e:
-        log.warning("n8n plan webhook failed: %s", e)
+        # Непредвиденная ошибка клиента/парсинга — безопасный fallback
+        log.warning("n8n plan webhook unexpected failure: %s | topic=%s user_id=%s", e, req.topic, req.user_id)
         return _stub_plan()
 
 
 def _stub_plan() -> StudyPlanInfo:
     return StudyPlanInfo(
         doc_url="https://docs.google.com/document/d/FAKE_M2_PLAN",
-        calendar_info=json.dumps({"created": False, "reason": "stub"}, ensure_ascii=False),
+        calendar_info={"created": False, "reason": "stub"},
     )
 
 
@@ -140,6 +194,57 @@ def _safe_json(resp: httpx.Response) -> Any | None:
             return json.loads(resp.text)
         except Exception:
             return None
+
+
+def _pick_ok_item(data: Any) -> dict | None:
+    """Поддержка двух форматов ответа: объект или массив объектов.
+    Возвращает первый элемент с ok=true, либо сам объект, если он не массив.
+    """
+    if isinstance(data, list):
+        for it in data:
+            if isinstance(it, dict) and it.get("ok") is True:
+                return it
+        # если нет ok=true, но массив непустой — вернём первый для диагностики
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _coerce_calendar_info(raw: Any) -> dict | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            v = json.loads(raw)
+            return v if isinstance(v, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def _extract_error_message(resp: httpx.Response) -> str | None:
+    data = _safe_json(resp)
+    if isinstance(data, dict):
+        return str(data.get("error") or data.get("message") or data.get("detail") or "").strip() or None
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict):
+            return str(first.get("error") or first.get("message") or first.get("detail") or "").strip() or None
+    return None
+
+
+def _safe_get(d: Any, key: str) -> Any:
+    return d.get(key) if isinstance(d, dict) else None
+
+
+def _log_n8n_business_error(req: StudyRequest, request_id: Any, msg: str | None) -> None:
+    log.warning(
+        "n8n plan business error: request_id=%s topic=%s user_id=%s detail=%s",
+        request_id, req.topic, req.user_id, (msg or "")
+    )
 
 
 def _extract_markdown_from_flowise(data: Any) -> str | None:

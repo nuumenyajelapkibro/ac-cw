@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -19,7 +19,7 @@ class StudyRequest(BaseModel):
 class StudyPlanInfo(BaseModel):
     """Результат планирования от n8n: ссылка на Doc и инфо по календарю."""
     doc_url: Optional[HttpUrl] = None
-    calendar_info: Optional[str] = None
+    calendar_info: Optional[Dict[str, Any]] = None
 
 
 class SummaryRequest(BaseModel):
