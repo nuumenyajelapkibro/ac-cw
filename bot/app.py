@@ -29,6 +29,7 @@ ORCHESTRATOR_URL = (
 BASE_URL = os.getenv("BASE_URL")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 APP_ENV = os.getenv("APP_ENV", "prod")
+ORCH_CLIENT_TIMEOUT = float(os.getenv("ORCH_CLIENT_TIMEOUT", "200.0"))
 
 if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN is not set")
@@ -56,7 +57,7 @@ dp = Dispatcher()
 TG_MESSAGE_LIMIT = 4096
 
 async def _post_json(path: str, json: Dict[str, Any]) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=ORCH_CLIENT_TIMEOUT) as client:
         resp = await client.post(f"{ORCHESTRATOR_URL}{path}", json=json)
         if resp.status_code == 409:
             detail = resp.json().get("detail", "Конфликт состояний")
@@ -65,7 +66,7 @@ async def _post_json(path: str, json: Dict[str, Any]) -> Dict[str, Any]:
         return resp.json()
 
 async def _get(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=ORCH_CLIENT_TIMEOUT) as client:
         resp = await client.get(f"{ORCHESTRATOR_URL}{path}", params=params)
         if resp.status_code == 409:
             detail = resp.json().get("detail", "Конфликт состояний")

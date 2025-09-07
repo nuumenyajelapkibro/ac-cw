@@ -28,7 +28,8 @@ N8N_BASIC_USER = os.getenv("N8N_BASIC_USER")
 N8N_BASIC_PASS = os.getenv("N8N_BASIC_PASS")
 FLOWISE_SUMMARY_URL = os.getenv("FLOWISE_SUMMARY_URL", "https://flowise.yumini.ru/summary_chain")
 FLOWISE_QUIZ_URL = os.getenv("FLOWISE_QUIZ_URL", "https://flowise.yumini.ru/quiz_chain")
-HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "30.0"))
+# Таймаут HTTP-запросов (по умолчанию увеличен из-за долгих флоу n8n)
+HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "180.0"))
 
 
 # =======================
